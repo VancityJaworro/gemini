@@ -1,0 +1,62 @@
+#!/bin/bash
+
+LOC=$(pwd)
+KERNEL_LOC="$(pwd)"
+DEVICE=gemini
+TOOLCHAIN="$LOC/../proton-clang/bin"
+ARCH=arm64
+DEFCONFIG=${DEVICE}_defconfig
+KERNEL_IMAGE="Image.gz-dtb"
+NAME=TheInfinityKernel-$DEVICE
+OUT="${DEVICE}_out"
+DATE=`date +%d%m%y*%H:%M`
+J=$(nproc)
+
+cd $KERNEL_LOC
+
+if [[ $1 == 'cfg' ]]; then
+export PATH="$TOOLCHAIN:$PATH"
+make 	-j$J O=$OUT \
+        ARCH=$ARCH \
+        CC=clang \
+	CROSS_COMPILE="aarch64-linux-gnu-" \
+	CROSS_COMPILE_ARM32="arm-linux-gnueabi-" \
+	menuconfig KCONFIG_CONFIG=$KERNEL_LOC/arch/arm64/configs/$DEFCONFIG
+
+	if ! [[ $2 == 'c' ]]; then
+		exit
+	fi
+fi
+
+#Clean
+rm package/zImage 2> /dev/null
+rm package/log 2> /dev/null
+rm $OUT/arch/$ARCH/boot/$KERNEL_IMAGE 2> /dev/null
+
+#Make defconfig
+make O=$OUT ARCH=$ARCH CROSS_COMPILE=$TOOLCHAIN $DEFCONFIG
+
+#Compile
+export PATH="$TOOLCHAIN:$PATH"
+make 	-j$J O=$OUT \
+        ARCH=$ARCH \
+        CC=clang \
+	CROSS_COMPILE="aarch64-linux-gnu-" \
+	CROSS_COMPILE_ARM32="arm-linux-gnueabi-" \
+	AR="llvm-ar" \
+	NM="llvm-nm" \
+	OBJCOPY="llvm-objcopy" \
+	OBJDUMP="llvm-objdump" \
+	STRIP="llvm-strip" LD="ld.lld"
+
+#Pack zip
+if [ -e $OUT/arch/$ARCH/boot/$KERNEL_IMAGE ]; then
+cp $OUT/arch/$ARCH/boot/$KERNEL_IMAGE $LOC/package/zImage
+git log --oneline -n 100 > "$LOC/package/log"
+cd $LOC/package
+sed -i "s/infinity-device/${DEVICE}/g" anykernel.sh
+zip -r9 ../compiled/$NAME-$DATE.zip *
+sed -i "s/${DEVICE}/infinity-device/g" anykernel.sh
+else
+echo 'No boot image!'
+fi
